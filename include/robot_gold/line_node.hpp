@@ -24,7 +24,6 @@ private:
 
     rclcpp::Subscription<std_msgs::msg::UInt16MultiArray>::SharedPtr line_sensors_subscriber_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr center_distance_publisher_;
-    rclcpp::TimerBase::SharedPtr timer_;
 
     void on_line_sensors_msg(const std_msgs::msg::UInt16MultiArray::SharedPtr msg);
 
