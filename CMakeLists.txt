@@ -22,6 +22,7 @@ add_executable(line_follow src/line_follow.cpp)
 add_executable(lidar_node src/lidar_node.cpp)
 add_executable(imu_node src/imu_node.cpp)
 add_executable(pokus src/smth.cpp)
+add_executable(camera_node src/camera_node.cpp)
 
 ament_target_dependencies(io_node rclcpp std_msgs)
 ament_target_dependencies(motor_node rclcpp std_msgs)
@@ -29,7 +30,8 @@ ament_target_dependencies(line_node rclcpp std_msgs)
 ament_target_dependencies(line_follow rclcpp std_msgs)
 ament_target_dependencies(lidar_node rclcpp std_msgs sensor_msgs)
 ament_target_dependencies(imu_node rclcpp std_msgs sensor_msgs)
-ament_target_dependencies(pokus rclcpp std_msgs sensor_msgs)
+ament_target_dependencies(pokus rclcpp std_msgs sensor_msgs cv_bridge image_transport OpenCV)
+ament_target_dependencies(camera_node rclcpp std_msgs sensor_msgs cv_bridge image_transport OpenCV)
 
 target_include_directories(io_node PUBLIC include/robot_gold)
 target_include_directories(line_node PUBLIC include/robot_gold)
@@ -38,6 +40,7 @@ target_include_directories(line_follow PUBLIC include/robot_gold)
 target_include_directories(lidar_node PUBLIC include/robot_gold)
 target_include_directories(imu_node PUBLIC include/robot_gold)
 target_include_directories(pokus PUBLIC include/robot_gold)
+target_include_directories(camera_node PUBLIC include/robot_gold)
 
 install(TARGETS
   io_node
@@ -47,6 +50,7 @@ install(TARGETS
   lidar_node
   imu_node
   pokus
+  camera_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
