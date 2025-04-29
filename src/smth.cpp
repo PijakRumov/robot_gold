@@ -3,6 +3,7 @@
 #include <numeric>
 #include <chrono>
 #include <memory>
+#include <utility>
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/imu.hpp"
@@ -24,13 +25,15 @@ struct LidarFiltrResults {
     float back;
     float left;
     float right;
+    std::pair<float, float> line_right;
+    std::pair<float, float> line_left;
 };
 
 class LidarFiltr {
 public:
     LidarFiltrResults apply_filter(std::vector<float> points, float angle_start, float angle_end) {
         constexpr float angle_range = M_PI / 6; //old = pi/12; sensing 45° to all 4 directions
-        std::vector<float> left, right, front, back;
+        std::vector<float> left, right, front, back, line_right, line_left;
         auto angle_step = (angle_end - angle_start) / points.size();
 
         for (size_t i = 0; i < points.size(); ++i) {
@@ -45,6 +48,20 @@ public:
                 left.push_back(points[i]);
             else if (angle < -M_PI + angle_range || angle > M_PI - angle_range)
                 front.push_back(points[i]);
+            else{
+                // what U doin?
+                // nothin, just hangin around
+                // dopsano 29.4.
+            }
+
+            if (angle > M_PI /2 + M_PI /6 && angle <= M_PI / 2 + M_PI / 4) // vyctu body z vyrezu 15 stupnu vpravo vpredu
+            {
+                line_right.push_back(points(i));
+            }
+            if(angle > -M_PI /2 - M_PI /6 && angle <= -M_PI / 2 - M_PI / 4) // body vlevo vpredu
+            {
+                line_left.push_back(points(i));
+            }
         }
 
         return {    // sum and divide by number of values -> average value returned
@@ -52,7 +69,34 @@ public:
             .back = back.empty() ? 0.0f : std::accumulate(back.begin(), back.end(), 0.0f) / back.size(),
             .left = left.empty() ? 0.0f : std::accumulate(left.begin(), left.end(), 0.0f) / left.size(),
             .right = right.empty() ? 0.0f : std::accumulate(right.begin(), right.end(), 0.0f) / right.size()
+            .line_right = linearRegression(line_right), // mozna neni smart pocitat v returnu funkci s aproximaci
+            .line_left = linearRegression(line_left)
         };
+    }
+
+    std::pair<float, float> linearRegression(const std::vector<float>& y_vals) { // ctu jen y data, x jsou zanedbatelne protoze 15° udela male zkresleni, x hodnoty jsou indexy
+        
+        // CHYBI KONTROLA ZE JSOU DATA BLIZKO SEBE mozna neni nutna ale nahodna chyba muze dost poazit regresi
+        // mozna dodelat po testovani
+        
+        int n = y_vals.size();
+        if (n < 2) return {0.0f, 0.0f}
+        float sum_x = 0.0f, sum_y = 0.0f, sum_xy = 0.0f, sum_x2 = 0.0f
+        for (int i = 0; i < n; ++i) {
+            float x = static_cast<float>(i);
+            float y = y_vals[i];
+            sum_x += x;
+            sum_y += y;
+            sum_xy += x * y;
+            sum_x2 += x * x;
+        }
+        float denom = n * sum_x2 - sum_x * sum_x;
+        if (denom == 0.0f) return {0.0f, 0.0f}; // Avoid division by zero
+
+        float a = (n * sum_xy - sum_x * sum_y) / denom;
+        float b = (sum_y * sum_x2 - sum_x * sum_xy) / denom;
+
+        return {a, b};
     }
 };
 
@@ -137,6 +181,14 @@ private:
         algorithms::LidarFiltr filter;
         auto results = filter.apply_filter(msg->ranges, msg->angle_min, msg->angle_max);
         bool need_ = true;
+
+        if(results.line_right.first >= -0.1f && results.line_right.first <= 0.1f){  // parametr "a" urcuje naklon primky, cim mensi tim rovnobeznejsi s robotem musi byt zed
+            RCLCPP_INFO(this->get_logger(), "corridor detected on RIGHT")
+        }
+
+        if(results.line_left.first >= -0.1f && results.line_left.first <= 0.1f){  // parametr "a" urcuje naklon primky, cim mensi tim rovnobeznejsi s robotem musi byt zed
+            RCLCPP_INFO(this->get_logger(), "corridor detected on LEFT")
+        }
 
         if (need_ && results.left > 0.35f && results.front < 0.25f) {    // deciding which way to turn
             start_turning(1);                                          // 1 == turn left
