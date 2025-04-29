@@ -85,7 +85,7 @@ public:
         motor_pub_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>("/bpc_prp_robot/set_motor_speeds", 10);
         lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>("/bpc_prp_robot/lidar", 10, std::bind(&CorridorRobot::lidar_callback, this, _1));
         imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>("/bpc_prp_robot/imu", 10, std::bind(&CorridorRobot::imu_callback, this, _1));
-        timer_ = this->create_wall_timer(std::chrono::seconds(5), std::bind(&CorridorRobot::switch_to_following, this));
+        timer_ = this->create_wall_timer(std::chrono::seconds(8), std::bind(&CorridorRobot::switch_to_following, this));
     }
 
 private:
@@ -138,13 +138,13 @@ private:
         auto results = filter.apply_filter(msg->ranges, msg->angle_min, msg->angle_max);
         bool need_ = true;
 
-        if (need_ && results.left > 0.3f && results.front < 0.25f) {    // deciding which way to turn
+        if (need_ && results.left > 0.35f && results.front < 0.25f) {    // deciding which way to turn
             start_turning(1);                                          // 1 == turn left
             return;
-        } else if (need_ && results.right > 0.3f && results.front < 0.25f) {    // old 0.3f, 0.3f
+        } else if (need_ && results.right > 0.35f && results.front < 0.25f) {    // old 0.3f, 0.3f
             start_turning(-1);
             return;
-        } else if (need_ && results.front < 0.20f) {    // if too close to wall, turn 90°, then robot will turn by condition above
+        } else if (need_ && results.front < 0.20f) {    // if too close to wall, turn 180
             start_turning(0);
             return;
         }
@@ -175,9 +175,11 @@ private:
             center_offset = 20;
         }
 
-        algorithms::Pid pid(0.45, 0.02, 0.015);
-        float x = pid.step(center_offset, 0.3);
-        send_motor_command(x);
+        algorithms::Pid pid(0.30, 0.02, 0.08); //0.08d
+        float x = pid.step(center_offset, 2);
+        algorithms::Pid pid2(0.30, 0.0, 0.0); //0.08d
+        float y = pid2.step(x, 1.2);
+        send_motor_command(x-y);
     }
 
     void start_turning(int direction) {
@@ -211,14 +213,14 @@ private:
         std_msgs::msg::UInt8MultiArray msg;
         uint8_t base = 128;         // 130 is base motor speed +-20 is 110 and 150
         if (direction == 0)
-            msg.data = {static_cast<uint8_t>(base - 15), static_cast<uint8_t>(base + 15)};
+            msg.data = {static_cast<uint8_t>(base - 12), static_cast<uint8_t>(base + 12)};
         else
-            msg.data = {static_cast<uint8_t>(base - 15 * direction), static_cast<uint8_t>(base + 15 * direction)};
+            msg.data = {static_cast<uint8_t>(base - 12 * direction), static_cast<uint8_t>(base + 12 * direction)};
         motor_pub_->publish(msg);
     }
 
     void send_motor_command(float pid_output) {
-        uint8_t base_speed = 140;
+        uint8_t base_speed = 135;
         std_msgs::msg::UInt8MultiArray msg;
         if (pid_output > 0) {
             msg.data = {base_speed, static_cast<uint8_t>(base_speed - pid_output)};
