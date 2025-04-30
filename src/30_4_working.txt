@@ -20,29 +20,6 @@ using namespace std::chrono_literals;
 rclcpp::TimerBase::SharedPtr go_straight_timer_;
 rclcpp::Time go_straight_start_time_;
 
-
-template<typename T>
-class MedianFilter {
-private:
-    std::vector<T> buffer;
-    size_t maxSize = 5;
-    size_t index = 0;
-
-public:
-    MedianFilter() : buffer(5, T()) {}
-
-    void addValue(T value) {
-        buffer[index] = value;
-        index = (index + 1) % maxSize;
-    }
-
-    T getMedian() const {
-        std::vector<T> temp = buffer;
-        std::sort(temp.begin(), temp.end());
-        return temp[maxSize / 2];
-    }
-};
-
 namespace algorithms {
 
 struct PolarPoint {
@@ -169,11 +146,6 @@ public:
     }
 
 private:
-    MedianFilter<float> lineRightSlopeFilter;
-    MedianFilter<float> lineRightInterceptFilter;
-    MedianFilter<float> lineLeftSlopeFilter;
-    MedianFilter<float> lineLeftInterceptFilter;
-
     void switch_to_following() {    // once turning ended call this to nullify integration -> switch to following
         integrator_.setCalibration(gyro_samples_);
         gyro_samples_.clear();
@@ -223,29 +195,19 @@ private:
         auto results = filter.apply_filter(msg->ranges, msg->angle_min, msg->angle_max);
         bool need_ = true;
 
-        
-        lineRightSlopeFilter.addValue(results.line_right.first);
-        lineRightInterceptFilter.addValue(results.line_right.second);
-        lineLeftSlopeFilter.addValue(results.line_left.first);
-        lineLeftInterceptFilter.addValue(results.line_left.second);
-
-        float smoothedRightA = lineRightSlopeFilter.getMedian();
-        float smoothedRightB = lineRightInterceptFilter.getMedian();
-        float smoothedLeftA = lineLeftSlopeFilter.getMedian();
-        float smoothedLeftB = lineLeftInterceptFilter.getMedian();
-
-        if ((smoothedRightA <= -1 || smoothedRightA >= 1) && std::abs(smoothedRightB) > 0.6) {
+        if((results.line_right.first <= -1 || results.line_right.first >= 1) && abs(results.line_right.second) > 0.6){  // parametr "a" urcuje naklon primky, cim mensi tim rovnobeznejsi s robotem musi byt zed
             RCLCPP_INFO(this->get_logger(), "corridor detected on RIGHT");
-            RCLCPP_INFO(this->get_logger(), "y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB);
-        } else if ((smoothedLeftA <= -1 || smoothedLeftA >= 1) && std::abs(smoothedLeftB) > 0.6) {
-            RCLCPP_INFO(this->get_logger(), "corridor detected on LEFT");
-            RCLCPP_INFO(this->get_logger(), "y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB);
-        } else {
-            RCLCPP_INFO(this->get_logger(), "corridor NOT detected");
-            RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB);
-            RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB);
+            RCLCPP_INFO(this->get_logger(), "y = ax + b; a= %f, b= %f",results.line_right.first, results.line_right.second);
         }
-        
+        else if((results.line_left.first <= -1 || results.line_left.first >= 1) && abs(results.line_left.second) > 0.6){  // parametr "a" urcuje naklon primky, cim mensi tim rovnobeznejsi s robotem musi byt zed
+            RCLCPP_INFO(this->get_logger(), "corridor detected on LEFT");
+            RCLCPP_INFO(this->get_logger(), "y = ax + b; a= %f, b= %f",results.line_left.first, results.line_left.second);
+        }
+        else{
+            RCLCPP_INFO(this->get_logger(), "corridor NOT detected");
+            RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f",results.line_left.first, results.line_left.second);
+            RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f",results.line_right.first, results.line_right.second);
+        }
 
         if (need_ && results.left > 0.35f && results.front < 0.25f) {    // deciding which way to turn
             start_turning(1);                                          // 1 == turn left
@@ -285,7 +247,7 @@ private:
         }
 
         algorithms::Pid pid(0.30, 0.02, 0.08); //0.08d
-        float x = pid.step(smoothedLeftA, 2);
+        float x = pid.step(center_offset, 2);
         algorithms::Pid pid2(0.30, 0.0, 0.0); //0.08d
         float y = pid2.step(x, 1.2);
         send_motor_command(x-y);

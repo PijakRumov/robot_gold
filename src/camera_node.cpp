@@ -60,7 +60,7 @@ private:
     cv::Mat last_frame_;
     std::vector<algorithms::ArucoDetector::Aruco> last_detections_;
 };
-
+/*
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
@@ -68,3 +68,4 @@ int main(int argc, char **argv)
     rclcpp::shutdown();
     return 0;
 }
+*/
