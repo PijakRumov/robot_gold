@@ -22,6 +22,7 @@ add_executable(line_follow src/line_follow.cpp)
 add_executable(lidar_node src/lidar_node.cpp)
 add_executable(imu_node src/imu_node.cpp)
 add_executable(pokus src/smth.cpp)
+
 #add_executable(camera_node src/camera_node.cpp)
 
 add_library(camera_node STATIC src/camera_node.cpp)
