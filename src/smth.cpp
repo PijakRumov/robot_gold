@@ -55,6 +55,10 @@ struct LidarFiltrResults {
     float back;
     float left;
     float right;
+    float left_front_corner;
+    float right_front_corner;
+    float left_back_corner;
+    float right_back_corner;
     std::pair<float, float> line_right;
     std::pair<float, float> line_left;
     std::pair<float, float> line_right_back;
@@ -65,7 +69,7 @@ class LidarFiltr {
 public:
     LidarFiltrResults apply_filter(std::vector<float> points, float angle_start, float angle_end) {
         constexpr float angle_range = M_PI / 6; //old = pi/12; sensing 45° to all 4 directions
-        std::vector<float> left, right, front, back;
+        std::vector<float> left, right, front, back, left_front_corner, right_front_corner, left_back_corner, right_back_corner;
         std::vector<PolarPoint> line_right, line_left, line_right_back, line_left_back;
         auto angle_step = (angle_end - angle_start) / points.size();
 
@@ -92,6 +96,7 @@ public:
                 //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr"), "angle: %f, dist: %f", angle, dist);
                 line_left.push_back({angle, dist});
             }
+            
             else if (angle < M_PI / 2 - M_PI / 6 && angle >= M_PI / 2 - M_PI / 4){
                 //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr"), "angle: %f, dist: %f", angle, dist); //zapisuje se
                 line_right_back.push_back({angle, dist});
@@ -100,6 +105,19 @@ public:
             else if (angle > -M_PI / 2 + M_PI / 6 && angle <= -M_PI / 2 + M_PI / 4){
                 //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr"), "angle: %f, dist: %f", angle, dist);
                 line_left_back.push_back({angle, dist});
+            }
+            
+            else if (angle > M_PI / 4 - angle_range && angle <= M_PI / 4 + angle_range) {
+                right_back_corner.push_back(points[i]);
+            }
+            else if (angle > -M_PI / 4 - angle_range && angle <= -M_PI / 4 + angle_range) {
+                left_back_corner.push_back(points[i]);
+            }
+            else if (angle > 3 * M_PI / 4 - angle_range && angle <= 3* M_PI / 4 + angle_range) {
+                right_front_corner.push_back(points[i]);
+            }
+            else if (angle > -3 * M_PI / 4 -angle_range && angle <= -3 * M_PI / 4 + angle_range) {
+                left_front_corner.push_back(points[i]);
             }        
             else{
                 // what U doin?
@@ -113,6 +131,10 @@ public:
             .back = back.empty() ? 0.0f : std::accumulate(back.begin(), back.end(), 0.0f) / back.size(),
             .left = left.empty() ? 0.0f : std::accumulate(left.begin(), left.end(), 0.0f) / left.size(),
             .right = right.empty() ? 0.0f : std::accumulate(right.begin(), right.end(), 0.0f) / right.size(),
+            .left_front_corner = left_front_corner.empty() ? 0.0f : std::accumulate(left_front_corner.begin(), left_front_corner.end(), 0.0f) / left_front_corner.size(),
+            .right_front_corner = right_front_corner.empty() ? 0.0f : std::accumulate(right_front_corner.begin(), right_front_corner.end(), 0.0f) / right_front_corner.size(),
+            .left_back_corner = left_back_corner.empty() ? 0.0f : std::accumulate(left_back_corner.begin(), left_back_corner.end(), 0.0f) / left_back_corner.size(),
+            .right_back_corner = right_back_corner.empty() ? 0.0f : std::accumulate(right_back_corner.begin(), right_back_corner.end(), 0.0f) / right_back_corner.size(),
             .line_right = linearRegressionPolar(line_right),
             .line_left = linearRegressionPolar(line_left),
             .line_right_back = linearRegressionPolar(line_right_back),
@@ -185,7 +207,7 @@ public:
         timer_ = this->create_wall_timer(std::chrono::seconds(8), std::bind(&CorridorRobot::switch_to_following, this));
 
         pid = std::make_shared<algorithms::Pid>(0.3, 0.0, 0.08);  // Parametry pro regulátor pro střed koridoru
-        pid2 = std::make_shared<algorithms::Pid>(1.30, 0.0, 0.08); 
+        pid2 = std::make_shared<algorithms::Pid>(0.30, 0.0, 0.08); 
         RCLCPP_INFO(this->get_logger(), "CorridorRobot initialized");
     }
 
@@ -238,7 +260,7 @@ private:
                         go_straight(1.0);
                         RCLCPP_INFO(this->get_logger(), "Finished turn 90, now GOING_STRAIGHT_AFTER_TURN");
                     }
-                }else if (turn_direction_ == 0 && (std::fabs(delta_yaw)) >= M_PI/1.2) {
+                }else if (turn_direction_ == 0 && (std::fabs(delta_yaw)) >= M_PI/1.1) {
                     if(state_ != STOP){  // added 17.4.
                         state_ = GOING_STRAIGHT_AFTER_TURN;
                         //std::this_thread::sleep_for(std::chrono::milliseconds(1200));
@@ -325,20 +347,22 @@ private:
         } else if ((std::abs(smoothedRightA) > the_a_limit) && std::abs(smoothedRightB) > 0.6 && std::abs(smoothedRightB) < 2 && (std::abs(smoothedRightA_back) > the_a_limit)) {
             RCLCPP_INFO(this->get_logger(), "corridor detected on RIGHT");
             detected_corridor = 2;
-            RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
+            //RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
         } else if ((std::abs(smoothedLeftA) > the_a_limit) && std::abs(smoothedLeftB) > 0.6 && std::abs(smoothedLeftB) < 2 && (std::abs(smoothedLeftA_back) > the_a_limit)) {
             RCLCPP_INFO(this->get_logger(), "corridor detected on LEFT");
             detected_corridor = 1;
-            RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
+            //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
         } else {
             RCLCPP_INFO(this->get_logger(), "corridor NOT detected");
             RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);   // info text
             detected_corridor = 0;
-            RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
-            RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
-            RCLCPP_INFO(this->get_logger(), "LEFT line BACK: y = ax + b; a= %f, b= %f", smoothedLeftA_back, smoothedLeftB_back); // info text
-            RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", smoothedRightA_back, smoothedRightB_back); // info text
-        }
+            
+            //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
+            //RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
+            //RCLCPP_INFO(this->get_logger(), "LEFT line BACK: y = ax + b; a= %f, b= %f", smoothedLeftA_back, smoothedLeftB_back); // info text
+            //RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", smoothedRightA_back, smoothedRightB_back); // info text
+        
+            }
 
         if (previous_detected_corridor_left == 1 && detected_corridor == 0) {
             left_line_end = 1;  // Zapíšeme 1 do left_line_end, když dojde k sestupné hraně
@@ -354,7 +378,7 @@ private:
         previous_detected_corridor_left = detected_corridor;
 
 
-        if (turn_to_!= -5){
+        if (turn_to_!= -5){        // NEJSME schopni projet zatacku + !!!!!! && results.front > 0.27f
             if(turn_to_ == 0 || turn_to_ == 1 || turn_to_ == 2){ // marker ID 0, 1, 2
                 RCLCPP_INFO(this->get_logger(), "Detected ArUco marker: %d", turn_to_);
                 if((turn_to_ == 1) && (need_ == true) && (detected_corridor == 1 || detected_corridor == 3)){//(detected_corridor == 1 || detected_corridor == 3)) {    // if too close to wall, turn 180
@@ -366,6 +390,18 @@ private:
                     right_line_end = 0;
                     start_turning(-1);                                          // -1 == turn left
                     turn_to_ = -5; // reset marker ID
+                    return;
+                } else if ((turn_to_ == 0)) {
+                    turn_to_ = -5;
+                    return;
+                } else if (need_ && results.left > 0.35f && results.front < 0.17f) {    // deciding which way to turn
+                    start_turning(1);                                          // 1 == turn left
+                    return;
+                } else if (need_ && results.right > 0.35f && results.front < 0.17f) {    // old 0.3f, 0.3f
+                    start_turning(-1);
+                    return;
+                } else if (need_ && results.front < 0.16f) {    // if too close to wall, turn 180
+                    start_turning(0);
                     return;
                 }
             }else{
@@ -393,6 +429,12 @@ private:
             results.right = 0.21f;  // old 0.25f
             //need_ = true;
         }
+        if(results.left_front_corner > 0.3f){
+            results.left_front_corner = 0.25f;
+        }
+        if(results.right_front_corner > 0.3f){
+            results.right_front_corner = 0.25f;
+        }
         
     /*
         if (need_ && results.right < 0.3f && results.front < 0.3f) {    // deciding which way to turn
@@ -403,6 +445,7 @@ private:
             return;
         }
         */
+       /*
         float tmp_smoothedLeftA;
         if (std::abs(smoothedLeftA) < 0.7f && std::abs(smoothedLeftA) > 0.01f){
             tmp_smoothedLeftA = smoothedLeftA;
@@ -416,31 +459,53 @@ private:
         }else{
             tmp_smoothedRightA = 4/16;
         }
-        
+        */
+        RCLCPP_INFO(this->get_logger(), "LEFT_BACK: %f", results.left_back_corner);
+        RCLCPP_INFO(this->get_logger(), "RIGHT_BACK: %f", results.right_back_corner);
+        RCLCPP_INFO(this->get_logger(), "LEFT: %f", results.left);
+        RCLCPP_INFO(this->get_logger(), "RIGHT: %f", results.right);
+        RCLCPP_INFO(this->get_logger(), "LEFT_FRONT: %f", results.left_front_corner);
+        RCLCPP_INFO(this->get_logger(), "RIGHT_FRONT: %f", results.right_front_corner);
+
+
         float center_offset = 0.0f;
-        if ((results.left > 0 && results.right > 0) || (abs(smoothedLeftA > 0.1) && abs(smoothedLeftB > 0.1))) {     // normal "in center of corridor" state
-            center_offset = (((results.right - results.left)) / 2) * 100 * tmp_smoothedLeftA * (16/4) * tmp_smoothedRightA * (16/4);
-        } else if (results.right > 0) {     // blank spot on right
-            center_offset = -20;
-        } else if (results.left > 0) {      // blank spot on left
-            center_offset = 20;
+        if (results.left > 0 && results.right > 0) {     // normal "in center of corridor" state
+            center_offset = ((results.right + results.right_front_corner) /2  - 
+                             (results.left + results.left_front_corner) / 2) * 100;
+            RCLCPP_INFO(this->get_logger(), "center offset TRUE: %f", center_offset);
+        } else if (results.right > 0) {     // too close to left wall
+            center_offset = -10;
+        } else if (results.left > 0) {      // too close to right wall
+            center_offset = 10;
         }
 
-        if (std::fabs(center_offset) < 0.2f){
+        
+
+        if (std::fabs(center_offset) < 10.0f) {    // if in center of corridor
+            float x = pid->step(center_offset, 0.1);
+            RCLCPP_INFO(this->get_logger(), "center offset PID: %f", center_offset);
+            //RCLCPP_INFO(this->get_logger(), "center offset: %f", center_offset);
+            //float y = pid2->step(x, 0.1);
+            RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
+            send_motor_command(x);
+        }else if (center_offset > 10.0f){
+            center_offset = 10.0f;
+            RCLCPP_INFO(this->get_logger(), "center offset PID: %f", center_offset);
+            float x = pid->step(center_offset, 0.1);
+            //RCLCPP_INFO(this->get_logger(), "center offset: %f", center_offset);
+            //float y = pid2->step(x, 0.1);
+            RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
+            send_motor_command(x);
+        }else if (center_offset < -10.0f){
+            center_offset = -10.0f;
             float x = pid->step(center_offset, 0.1);
             RCLCPP_INFO(this->get_logger(), "center offset: %f", center_offset);
             //float y = pid2->step(x, 0.1);
             RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
             send_motor_command(x);
-        }else if (std::fabs(center_offset) > 0.2f){
-            float y = pid2->step(center_offset, 0.1);
-            RCLCPP_INFO(this->get_logger(), "center offset: %f", center_offset);
-            //float y = pid2->step(x, 0.1);
-            RCLCPP_INFO(this->get_logger(), "PID output: %f", y);
-            send_motor_command(y);
         }else {
             std_msgs::msg::UInt8MultiArray msg;
-            msg.data = {135, 135};  
+            msg.data = {145, 145};  
             motor_pub_->publish(msg);
             RCLCPP_INFO(this->get_logger(), "Motors running...");
         }
@@ -450,7 +515,7 @@ private:
         yaw_start_ = integrator_.getYaw();
         turn_direction_ = direction;
         state_ = TURNING;
-        RCLCPP_INFO(this->get_logger(), "Starting turn to %s", direction > 0 ? "right" : "left");
+        RCLCPP_INFO(this->get_logger(), "Starting turn to %s", direction > 0 ? "left" : "right");
     }
 
     void go_straight(double duration_seconds) {
