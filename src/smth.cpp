@@ -223,7 +223,7 @@ private:
     MedianFilter<float> lineLeftInterceptFilterBack;
     rclcpp::TimerBase::SharedPtr marker_timer_;
 
-    std::shared_ptr<algorithms::Pid> pid;   // přidej tuto řádku
+    std::shared_ptr<algorithms::Pid> pid;   // pid
     std::shared_ptr<algorithms::Pid> pid2;
 
 
