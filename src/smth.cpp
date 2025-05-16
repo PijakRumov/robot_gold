@@ -57,8 +57,8 @@ struct LidarFiltrResults {
     float right;
     float left_front_corner;
     float right_front_corner;
-    float left_back_corner;
-    float right_back_corner;
+    //float left_back_corner;
+    //float right_back_corner;
     std::pair<float, float> line_right;
     std::pair<float, float> line_left;
     std::pair<float, float> line_right_back;
@@ -69,8 +69,8 @@ struct LidarFiltrResults {
 class LidarFiltr {
 public:
     LidarFiltrResults apply_filter(std::vector<float> points, float angle_start, float angle_end) {
-        constexpr float angle_range = M_PI / 6; //old = pi/12; sensing 45° to all 4 directions
-        std::vector<float> left, right, front, back, left_front_corner, right_front_corner, left_back_corner, right_back_corner;
+        constexpr float angle_range = M_PI / 12; //old = pi/12 => 15°; sensing 2x15° from all directions // ZK1 melo PI/
+        std::vector<float> left, right, front, back, left_front_corner, right_front_corner;// left_back_corner, right_back_corner;
         std::vector<PolarPoint> line_right, line_left, line_right_back, line_left_back;
         auto angle_step = (angle_end - angle_start) / points.size();
 
@@ -88,38 +88,33 @@ public:
             else if (angle < -M_PI + angle_range || angle > M_PI - angle_range)
                 front.push_back(points[i]);
 
-            else if (angle > M_PI / 2 + M_PI / 6 && angle <= M_PI / 2 + M_PI / 4){
-                //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr"), "angle: %f, dist: %f", angle, dist); //zapisuje se
+            else if (angle > M_PI / 2 + M_PI / 6 && angle <= M_PI * (17/24)){ // old M_PI / 2 + M_PI / 4; merim mensi uhel
                 line_right.push_back({angle, dist});
-                //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr")," values: %f ",line_right); //zapisuje se
             }
-            else if (angle < -M_PI / 2 - M_PI / 6 && angle >= -M_PI / 2 - M_PI / 4){
-                //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr"), "angle: %f, dist: %f", angle, dist);
+            else if (angle < -M_PI / 2 - M_PI / 6 && angle >= -M_PI * (17/24)){ // old -M_PI / 2 - M_PI / 4
                 line_left.push_back({angle, dist});
             }
-            
-            else if (angle < M_PI / 2 - M_PI / 6 && angle >= M_PI / 2 - M_PI / 4){
-                //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr"), "angle: %f, dist: %f", angle, dist); //zapisuje se
+            else if (angle < M_PI / 2 - M_PI / 6 && angle >= M_PI * (7/24)){ // old M_PI / 2 - M_PI / 4)
                 line_right_back.push_back({angle, dist});
-                //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr")," values: %f ",line_right); //zapisuje se
             }
-            else if (angle > -M_PI / 2 + M_PI / 6 && angle <= -M_PI / 2 + M_PI / 4){
-                //RCLCPP_INFO(rclcpp::get_logger("LidarFiltr"), "angle: %f, dist: %f", angle, dist);
+            else if (angle > -M_PI / 2 + M_PI / 6 && angle <= -M_PI * (7/24)){ // old -M_PI / 2 + M_PI / 4
                 line_left_back.push_back({angle, dist});
             }
-            
+/*            
             else if (angle > M_PI / 4 - angle_range && angle <= M_PI / 4 + angle_range) {
                 right_back_corner.push_back(points[i]);
             }
             else if (angle > -M_PI / 4 - angle_range && angle <= -M_PI / 4 + angle_range) {
                 left_back_corner.push_back(points[i]);
             }
+                */
             else if (angle > 3 * M_PI / 4 - angle_range && angle <= 3* M_PI / 4 + angle_range) {
                 right_front_corner.push_back(points[i]);
             }
             else if (angle > -3 * M_PI / 4 -angle_range && angle <= -3 * M_PI / 4 + angle_range) {
                 left_front_corner.push_back(points[i]);
             }        
+                
             else{
                 // what U doin?
                 // nothin, just hangin around
@@ -134,8 +129,8 @@ public:
             .right = right.empty() ? 0.0f : std::accumulate(right.begin(), right.end(), 0.0f) / right.size(),
             .left_front_corner = left_front_corner.empty() ? 0.0f : std::accumulate(left_front_corner.begin(), left_front_corner.end(), 0.0f) / left_front_corner.size(),
             .right_front_corner = right_front_corner.empty() ? 0.0f : std::accumulate(right_front_corner.begin(), right_front_corner.end(), 0.0f) / right_front_corner.size(),
-            .left_back_corner = left_back_corner.empty() ? 0.0f : std::accumulate(left_back_corner.begin(), left_back_corner.end(), 0.0f) / left_back_corner.size(),
-            .right_back_corner = right_back_corner.empty() ? 0.0f : std::accumulate(right_back_corner.begin(), right_back_corner.end(), 0.0f) / right_back_corner.size(),
+            //.left_back_corner = left_back_corner.empty() ? 0.0f : std::accumulate(left_back_corner.begin(), left_back_corner.end(), 0.0f) / left_back_corner.size(),
+            //.right_back_corner = right_back_corner.empty() ? 0.0f : std::accumulate(right_back_corner.begin(), right_back_corner.end(), 0.0f) / right_back_corner.size(),
             .line_right = linearRegressionPolar(line_right),
             .line_left = linearRegressionPolar(line_left),
             .line_right_back = linearRegressionPolar(line_right_back),
@@ -243,6 +238,20 @@ private:
     std::shared_ptr<algorithms::Pid> pid;   // pid
     std::shared_ptr<algorithms::Pid> pid2;
 
+    struct LaneLineData {
+        float front;
+        float right;
+        float left;
+        float rightA;
+        float rightB;
+        float leftA;
+        float leftB;
+        float rightA_back;
+        float rightB_back;
+        float leftA_back;
+        float leftB_back;
+    };
+    LaneLineData laneData;
 
     void switch_to_following() {    // once turning ended call this to nullify integration -> switch to following
         integrator_.setCalibration(gyro_samples_);
@@ -274,14 +283,14 @@ private:
                     if(state_ != STOP){  // added 17.4.
                         state_ = GOING_STRAIGHT_AFTER_TURN;
                         //std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-                        go_straight(2.5);
+                        go_straight(1.1);
                         RCLCPP_INFO(this->get_logger(), "Finished turn 90, now GOING_STRAIGHT_AFTER_TURN");
                     }
                 }else if (turn_direction_ == 0 && (std::fabs(delta_yaw)) >= M_PI/1.1) {
                     if(state_ != STOP){  // added 17.4.
                         state_ = GOING_STRAIGHT_AFTER_TURN;
                         //std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-                        go_straight(2.5);
+                        go_straight(1.1);
                         RCLCPP_INFO(this->get_logger(), "Finished turn 180, now GOING_STRAIGHT_AFTER_TURN");
                     }
                 } else {
@@ -341,8 +350,127 @@ private:
         return right_median;
     }
 
+    int check_for_crossroads(data){
+        int the_a_limit = 1.5;
+
+        if (((std::abs(data.rightA) > the_a_limit) && (abs(data.rightA_back) > the_a_limit) && std::abs(data.rightB) < 2) &&  ((std::abs(data.leftA) > the_a_limit) && (std::abs(data.leftA_back) > the_a_limit) && std::abs(data.leftB) < 2) && data.front > 0.35f) {
+            RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT LEFT \t by LINES");
+            detected_corridor = 3;
+            return 1;
+        } else if ((std::abs(data.rightA) > the_a_limit) && std::abs(data.rightA) > the_a_limit && std::abs(data.rightB) < 2 && (std::abs(data.rightA_back) > the_a_limit) data.front > 0.40f) {
+            RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT FRONT \t by LINES");
+            detected_corridor = 2;
+            //RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
+            return 1;
+        } else if ((std::abs(data.leftA) > the_a_limit) && std::abs(data.leftB) > the_a_limit && std::abs(data.leftB) < 2 && (std::abs(data.leftA_back) > the_a_limit) data.front > 0.40f) {
+            RCLCPP_INFO(this->get_logger(), "crossroads detected \t LEFT FRONT \t by LINES");
+            detected_corridor = 1;
+            //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
+            return 1;
+        } else if (data.right > 0.35f && data.front > 0.40f && data.left > 0.35f){
+            RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT LEFT FRONT \t by MK");
+            detected_corridor = 6;
+            return 1;
+        } else if (data.right > 0.35f && data.front > 0.40f){
+            RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT FRONT \t by MK");
+            detected_corridor = 4;
+            return 1;
+        } else if (data.left > 0.35f && data.front > 0.40f){
+            RCLCPP_INFO(this->get_logger(), "crossroads detected \t on LEFT FRONT \t by MK");
+            detected_corridor = 5;   
+            return 1;   
+        } else {
+            RCLCPP_INFO(this->get_logger(), "crossroads detected \t NOT");
+            RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);   // info text
+            detected_corridor = 0;
+            //RCLCPP_INFO(this->get_logger(), "RIGHT median: %f", results.median_right); // info text
+            //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
+            //RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", data.rightA, data.rightB); // info text
+            //RCLCPP_INFO(this->get_logger(), "LEFT line BACK: y = ax + b; a= %f, b= %f", smoothedLeftA_back, smoothedLeftB_back); // info text
+            //RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", data.rightA_back, data.rightB_back); // info text
+        }
+        return 0;
+    }
+
+    int check_for_corridor(data){
+        if (data.right > 0.35f && data.front < 0.40f){
+            RCLCPP_INFO(this->get_logger(), "corridor detected \t RIGHT FRONT \t by MK");
+            detected_corridor = 7;
+            return 1;
+        } else if (data.left > 0.35f && data.front < 0.40f){
+            RCLCPP_INFO(this->get_logger(), "corridor detected \t on LEFT FRONT \t by MK");
+            detected_corridor = 8;   
+            return 1;    
+        } else {
+            RCLCPP_INFO(this->get_logger(), "corridor detected \t NOT");
+            RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);
+            detected_corridor = 0;
+        }
+        return 0;
+    }
+
+    void turning_decision(){
+        if (turn_to_!= -5){       // kontrola jestli je na stacku marker
+            if(turn_to_ > 0 && turn_to_ < 7){ // reaguje na crossroads
+                //RCLCPP_INFO(this->get_logger(), "Detected ArUco marker: %d", turn_to_);
+                if((turn_to_ == 1) && (detected_corridor == 5 || detected_corridor == 6)){
+                    RCLCPP_INFO(this->get_logger(), "turning \t LEFT \t by MK");
+                    pause_and_turn(1); // 1 = turn LEFT
+                    //start_turning(1); // 1 = turn LEFT
+                    turn_to_ = -5; // reset marker ID
+                    return;
+                } else if ((turn_to_ == 2) && (detected_corridot = 4 || detected_corridor == 6)) {    // deciding which way to turn
+                    RCLCPP_INFO(this->get_logger(), "turning \t RIGHT \t by MK");
+                    pause_then_turn(-1); // -1 == turn RIGHT
+                    //start_turning(-1);                                          // -1 == turn RIGHT
+                    turn_to_ = -5; // reset marker ID
+                    return;
+                } else if ((turn_to_ == 1) && (detected_corridor == 1 || detected_corridor == 3 )) {
+                    RCLCPP_INFO(this->get_logger(), "turning \t LEFT \t by LINES");
+                    start_turning(1); // 1 = turn LEFT
+                    turn_to_ = -5;
+                    return;
+                } else if ((turn_to_ == 2) && (detected_corridor == 2 || detected_corridor == 3)) {
+                    RCLCPP_INFO(this->get_logger(), "turning \t RIGHT \t by LINES");
+                    start_turning(-1); // -1 == turn RIGHT
+                    turn_to_ = -5;
+                    return;
+                } else if ((turn_to_ == 0) && (detected_corridor == 1 || detected_corridor == 2 || detected_corridor == 4 || detected_corridor == 5 || detected_corridor == 6)) {
+                    RCLCPP_INFO(this->get_logger(), "turning \t STRAIGHT \t by YO MAMA");
+                    turn_to_ = -5;
+                    return;
+                }
+            }else{      // executed when only corridor detected
+                if (esults.left > 0.35f && results.front < 0.25f) {    // old < 0.19f
+                    start_turning(1);                                          // 1 == turn left
+                    return;
+                } else if (results.right > 0.35f && results.front < 0.25f) {    // old 0.3f, 0.3f
+                    start_turning(-1);
+                    return;
+                } else if (results.front < 0.20f) {    // if too close to wall, turn 180
+                    start_turning(0);
+                    return;
+                }
+
+            }
+        }else{
+
+            if (need_ && results.left > 0.35f && results.front < 0.25f) {    // deciding which way to turn
+                start_turning(1);                                          // 1 == turn left
+                return;
+            } else if (need_ && results.right > 0.35f && results.front < 0.25f) {    // old 0.3f, 0.3f
+                start_turning(-1);
+                return;
+            } else if (need_ && results.front < 0.20f) {    // if too close to wall, turn 180
+                start_turning(0);
+                return;
+            }
+        }
+    }
+
     void lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {     // from lidar data to offset value for motors
         if (state_ != CORRIDOR_FOLLOWING) return;
+
 
         algorithms::LidarFiltr filter;
         auto results = filter.apply_filter(msg->ranges, msg->angle_min, msg->angle_max);
@@ -362,17 +490,29 @@ private:
         lineLeftSlopeFilterBack.addValue(results.line_left_back.first);
         lineLeftInterceptFilterBack.addValue(results.line_left_back.second);
 
-        float smoothedRightA = lineRightSlopeFilter.getMedian();
-        float smoothedRightB = lineRightInterceptFilter.getMedian();
-        float smoothedLeftA = lineLeftSlopeFilter.getMedian();
-        float smoothedLeftB = lineLeftInterceptFilter.getMedian();
-        float smoothedRightA_back = lineRightSlopeFilterBack.getMedian();
-        float smoothedRightB_back = lineRightInterceptFilterBack.getMedian();
-        float smoothedLeftA_back = lineLeftSlopeFilterBack.getMedian();
-        float smoothedLeftB_back = lineLeftInterceptFilterBack.getMedian();
+        laneData.rightA = lineRightSlopeFilter.getMedian();
+        laneData.rightB = lineRightInterceptFilter.getMedian();
+        laneData.leftA = lineLeftSlopeFilter.getMedian();
+        laneData.leftB = lineLeftInterceptFilter.getMedian();
+        laneData.rightA_back = lineRightSlopeFilterBack.getMedian();
+        laneData.rightB_back = lineRightInterceptFilterBack.getMedian();
+        laneData.leftA_back = lineLeftSlopeFilterBack.getMedian();
+        laneData.leftB_back = lineLeftInterceptFilterBack.getMedian();
+        laneData.front = results.front;
+        laneData.right = results.right;
+        laneData.left = results.left;
+
+        if(check_for_crossroads(laneData) != 1){
+            if(check_for_corridor(laneData) != 1){
+                //everythin is fucked or no corridor detected
+            }
+        }
         // the old way
         //if (((smoothedRightA <= -5 || smoothedRightA >= 5) && std::abs(smoothedRightB) > 0.6 && std::abs(smoothedRightB) < 2) &&  ((smoothedLeftA <= -5 || smoothedLeftA >= 5) && std::abs(smoothedLeftB) > 0.6 && std::abs(smoothedLeftB) < 2)) {
+        /*
         int the_a_limit = 1.5;
+        
+
         if (((std::abs(smoothedRightA) > the_a_limit) && (abs(smoothedRightA_back) > the_a_limit) && std::abs(smoothedRightB) < 2) &&  ((std::abs(smoothedLeftA) > the_a_limit) && (std::abs(smoothedLeftA_back) > the_a_limit) && std::abs(smoothedLeftB) < 2)) {
             RCLCPP_INFO(this->get_logger(), "corridor detected on BOTH sides");
             detected_corridor = 3;
@@ -394,22 +534,9 @@ private:
             //RCLCPP_INFO(this->get_logger(), "LEFT line BACK: y = ax + b; a= %f, b= %f", smoothedLeftA_back, smoothedLeftB_back); // info text
             RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", smoothedRightA_back, smoothedRightB_back); // info text
         
-            }
+        }
+            */
 /*
-        if (previous_detected_corridor_left == 1 && detected_corridor == 0) {
-            left_line_end = 1;  // Zapíšeme 1 do left_line_end, když dojde k sestupné hraně
-            RCLCPP_INFO(this->get_logger(), "Left line ENDs detected");
-        }
-        if(previous_detected_corridor_right == 2 && detected_corridor == 0) {
-            right_line_end = 1;  // Zapíšeme 1 do right_line_end, když dojde k sestupné hraně
-            RCLCPP_INFO(this->get_logger(), "Right line ENDs detected");
-        }
-        
-    
-        // Aktualizujeme hodnotu předchozího stavu
-        previous_detected_corridor_left = detected_corridor;
-*/
-
         if (turn_to_!= -5){        // NEJSME schopni projet zatacku + !!!!!! && results.front > 0.27f
             if(turn_to_ == 0 || turn_to_ == 1 || turn_to_ == 2){ // marker ID 0, 1, 2
                 RCLCPP_INFO(this->get_logger(), "Detected ArUco marker: %d", turn_to_);
@@ -453,6 +580,7 @@ private:
                 return;
             }
         }
+            */
         if (results.left > 0.3f) {      // when value > 30 cm detected overwrite with 25 cm
             results.left = 0.21f;
             //need_ = true;
@@ -492,12 +620,10 @@ private:
             tmp_smoothedRightA = 4/16;
         }
         */
-        RCLCPP_INFO(this->get_logger(), "LEFT_BACK: %f", results.left_back_corner);
-        RCLCPP_INFO(this->get_logger(), "RIGHT_BACK: %f", results.right_back_corner);
-        RCLCPP_INFO(this->get_logger(), "LEFT: %f", results.left);
-        RCLCPP_INFO(this->get_logger(), "RIGHT: %f", results.right);
-        RCLCPP_INFO(this->get_logger(), "LEFT_FRONT: %f", results.left_front_corner);
-        RCLCPP_INFO(this->get_logger(), "RIGHT_FRONT: %f", results.right_front_corner);
+        //RCLCPP_INFO(this->get_logger(), "LEFT: %f", results.left);
+        //RCLCPP_INFO(this->get_logger(), "RIGHT: %f", results.right);
+        //RCLCPP_INFO(this->get_logger(), "LEFT_FRONT: %f", results.left_front_corner);
+        //RCLCPP_INFO(this->get_logger(), "RIGHT_FRONT: %f", results.right_front_corner);
 
 
         float center_offset = 0.0f;
@@ -541,6 +667,26 @@ private:
             motor_pub_->publish(msg);
             RCLCPP_INFO(this->get_logger(), "Motors running...");
         }
+    }
+
+    void pause_and_turn(int direction) {
+        RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
+        auto pause_timer = this->create_wall_timer(
+            100ms,
+            [this, direction, start = this->now(), pause_timer = rclcpp::TimerBase::WeakPtr()]() mutable {
+                if ((this->now() - start).seconds() >= 1.0) {
+                    if (auto timer = pause_timer.lock()) {
+                        timer->cancel();
+                    }
+                    start_turning(direction);
+                } else {
+                    // Go straight during the pause
+                    std_msgs::msg::UInt8MultiArray msg;
+                    msg.data = {140, 140};
+                    motor_pub_->publish(msg);
+                }
+            }
+        );
     }
 
     void start_turning(int direction) {
