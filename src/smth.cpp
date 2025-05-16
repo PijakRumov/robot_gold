@@ -63,6 +63,7 @@ struct LidarFiltrResults {
     std::pair<float, float> line_left;
     std::pair<float, float> line_right_back;
     std::pair<float, float> line_left_back;
+    float median_right;
 };
 
 class LidarFiltr {
@@ -139,9 +140,25 @@ public:
             .line_left = linearRegressionPolar(line_left),
             .line_right_back = linearRegressionPolar(line_right_back),
             .line_left_back = linearRegressionPolar(line_left_back)
+            //.median_right = getRightMedian(right)
         };
     }
-
+/*
+    float getRightMedian(const std::vector<float>& input) {
+        std::vector<float> temp = input;
+        std::sort(temp.begin(), temp.end());
+        int size = temp.size();
+    
+        float right_median;
+        if (size % 2 == 1) {
+            right_median = temp[size / 2];
+        } else {
+            right_median = (temp[size / 2 - 1] + temp[size / 2]) / 2.0f;
+        }
+    
+        return right_median;
+    }
+*/
     std::pair<float, float> linearRegressionPolar(const std::vector<PolarPoint>& points) {
         int n = points.size();
         if (n < 2) {
@@ -257,14 +274,14 @@ private:
                     if(state_ != STOP){  // added 17.4.
                         state_ = GOING_STRAIGHT_AFTER_TURN;
                         //std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-                        go_straight(1.0);
+                        go_straight(2.5);
                         RCLCPP_INFO(this->get_logger(), "Finished turn 90, now GOING_STRAIGHT_AFTER_TURN");
                     }
                 }else if (turn_direction_ == 0 && (std::fabs(delta_yaw)) >= M_PI/1.1) {
                     if(state_ != STOP){  // added 17.4.
                         state_ = GOING_STRAIGHT_AFTER_TURN;
                         //std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-                        go_straight(1.0);
+                        go_straight(2.5);
                         RCLCPP_INFO(this->get_logger(), "Finished turn 180, now GOING_STRAIGHT_AFTER_TURN");
                     }
                 } else {
@@ -309,6 +326,21 @@ private:
         }
     }
 
+    float getRightMedian(const std::vector<float>& input) {
+        std::vector<float> temp = input;
+        std::sort(temp.begin(), temp.end());
+        int size = temp.size();
+    
+        float right_median;
+        if (size % 2 == 1) {
+            right_median = temp[size / 2];
+        } else {
+            right_median = (temp[size / 2 - 1] + temp[size / 2]) / 2.0f;
+        }
+    
+        return right_median;
+    }
+
     void lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {     // from lidar data to offset value for motors
         if (state_ != CORRIDOR_FOLLOWING) return;
 
@@ -344,7 +376,7 @@ private:
         if (((std::abs(smoothedRightA) > the_a_limit) && (abs(smoothedRightA_back) > the_a_limit) && std::abs(smoothedRightB) < 2) &&  ((std::abs(smoothedLeftA) > the_a_limit) && (std::abs(smoothedLeftA_back) > the_a_limit) && std::abs(smoothedLeftB) < 2)) {
             RCLCPP_INFO(this->get_logger(), "corridor detected on BOTH sides");
             detected_corridor = 3;
-        } else if ((std::abs(smoothedRightA) > the_a_limit) && std::abs(smoothedRightB) > 0.6 && std::abs(smoothedRightB) < 2 && (std::abs(smoothedRightA_back) > the_a_limit)) {
+        } else if ((std::abs(smoothedRightA_back) > the_a_limit) && std::abs(smoothedRightB_back) > 0.6 && std::abs(smoothedRightB_back) < 2 && results.right > 0.30f){// && && std::abs(results.median_right) > 1.1
             RCLCPP_INFO(this->get_logger(), "corridor detected on RIGHT");
             detected_corridor = 2;
             //RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
@@ -356,14 +388,14 @@ private:
             RCLCPP_INFO(this->get_logger(), "corridor NOT detected");
             RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);   // info text
             detected_corridor = 0;
-            
+            RCLCPP_INFO(this->get_logger(), "RIGHT median: %f", results.median_right); // info text
             //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
-            //RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
+            RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
             //RCLCPP_INFO(this->get_logger(), "LEFT line BACK: y = ax + b; a= %f, b= %f", smoothedLeftA_back, smoothedLeftB_back); // info text
-            //RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", smoothedRightA_back, smoothedRightB_back); // info text
+            RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", smoothedRightA_back, smoothedRightB_back); // info text
         
             }
-
+/*
         if (previous_detected_corridor_left == 1 && detected_corridor == 0) {
             left_line_end = 1;  // Zapíšeme 1 do left_line_end, když dojde k sestupné hraně
             RCLCPP_INFO(this->get_logger(), "Left line ENDs detected");
@@ -376,7 +408,7 @@ private:
     
         // Aktualizujeme hodnotu předchozího stavu
         previous_detected_corridor_left = detected_corridor;
-
+*/
 
         if (turn_to_!= -5){        // NEJSME schopni projet zatacku + !!!!!! && results.front > 0.27f
             if(turn_to_ == 0 || turn_to_ == 1 || turn_to_ == 2){ // marker ID 0, 1, 2
@@ -386,7 +418,7 @@ private:
                     start_turning(1);
                     turn_to_ = -5; // reset marker ID
                     return;
-                } else if ((turn_to_ == 2) && (need_ == true) && (detected_corridor == 2 || detected_corridor == 3)) {    // deciding which way to turn
+                } else if ((turn_to_ == 2) && ((need_ == true) && (detected_corridor == 2 || detected_corridor == 3) || right_line_end == 1)) {    // deciding which way to turn
                     right_line_end = 0;
                     start_turning(-1);                                          // -1 == turn left
                     turn_to_ = -5; // reset marker ID
@@ -394,10 +426,10 @@ private:
                 } else if ((turn_to_ == 0)) {
                     turn_to_ = -5;
                     return;
-                } else if (need_ && results.left > 0.35f && results.front < 0.17f) {    // deciding which way to turn
+                } else if (need_ && results.left > 0.35f && results.front < 0.19f) {    // deciding which way to turn
                     start_turning(1);                                          // 1 == turn left
                     return;
-                } else if (need_ && results.right > 0.35f && results.front < 0.17f) {    // old 0.3f, 0.3f
+                } else if (need_ && results.right > 0.35f && results.front < 0.19f) {    // old 0.3f, 0.3f
                     start_turning(-1);
                     return;
                 } else if (need_ && results.front < 0.16f) {    // if too close to wall, turn 180
@@ -524,6 +556,8 @@ private:
             100ms,
             [this, duration_seconds]() {
                 auto now = this->now();
+                int last_marker_id = camera_node_->getLastMarkerId();
+                check_for_marker(last_marker_id);
                 if ((now - go_straight_start_time_).seconds() >= duration_seconds) {
                     go_straight_timer_->cancel();
                     if (state_ == GOING_STRAIGHT_AFTER_TURN && state_ != STOP) { // stop added 17.4.

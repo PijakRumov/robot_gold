@@ -28,11 +28,13 @@ public:
     {
         if (!last_detections_.empty())
         {
+            if(last_detections_.back().id == 0 || last_detections_.back().id == 1 || last_detections_.back().id == 2){
+                return -5;      // if odkomentovat pro prioritu modu ESCAPE (TREASURE mod if potrebuje)
+            }
             return last_detections_.back().id;
         }
         return -5; // or handle it however you'd like if no markers were detected
     }
-
 private:
     void imageCallback(const sensor_msgs::msg::CompressedImage::SharedPtr msg)
     {
