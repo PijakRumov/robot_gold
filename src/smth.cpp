@@ -19,7 +19,7 @@ using namespace std::chrono_literals;
 
 rclcpp::TimerBase::SharedPtr go_straight_timer_;
 rclcpp::Time go_straight_start_time_;
-
+rclcpp::TimerBase::SharedPtr pause_and_turn_timer_;
 
 template<typename T>
 class MedianFilter {
@@ -212,6 +212,23 @@ public:
     int previous_detected_corridor_right = 0;
     int left_line_end = 0;
     int right_line_end = 0;
+    int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
+
+    struct LaneLineData {
+        float front;
+        float right;
+        float left;
+        float rightA;
+        float rightB;
+        float leftA;
+        float leftB;
+        float rightA_back;
+        float rightB_back;
+        float leftA_back;
+        float leftB_back;
+    };
+    LaneLineData laneData;
+
     CorridorRobot(std::shared_ptr<CameraNode> camera_node) : camera_node_(camera_node), Node("corridor_robot"), state_(CALIBRATION), yaw_start_(0.0) {
         motor_pub_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>("/bpc_prp_robot/set_motor_speeds", 10);
         lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>("/bpc_prp_robot/lidar", 10, std::bind(&CorridorRobot::lidar_callback, this, _1));
@@ -234,24 +251,11 @@ private:
     MedianFilter<float> lineLeftSlopeFilterBack;
     MedianFilter<float> lineLeftInterceptFilterBack;
     rclcpp::TimerBase::SharedPtr marker_timer_;
+    rclcpp::TimerBase::SharedPtr pause_and_turn_timer_;
 
-    std::shared_ptr<algorithms::Pid> pid;   // pid
+    std::shared_ptr<algorithms::Pid> pid;
     std::shared_ptr<algorithms::Pid> pid2;
 
-    struct LaneLineData {
-        float front;
-        float right;
-        float left;
-        float rightA;
-        float rightB;
-        float leftA;
-        float leftB;
-        float rightA_back;
-        float rightB_back;
-        float leftA_back;
-        float leftB_back;
-    };
-    LaneLineData laneData;
 
     void switch_to_following() {    // once turning ended call this to nullify integration -> switch to following
         integrator_.setCalibration(gyro_samples_);
@@ -350,19 +354,20 @@ private:
         return right_median;
     }
 
-    int check_for_crossroads(data){
+    int check_for_crossroads(const LaneLineData data){
         int the_a_limit = 1.5;
+        //int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
 
         if (((std::abs(data.rightA) > the_a_limit) && (abs(data.rightA_back) > the_a_limit) && std::abs(data.rightB) < 2) &&  ((std::abs(data.leftA) > the_a_limit) && (std::abs(data.leftA_back) > the_a_limit) && std::abs(data.leftB) < 2) && data.front > 0.35f) {
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT LEFT \t by LINES");
             detected_corridor = 3;
             return 1;
-        } else if ((std::abs(data.rightA) > the_a_limit) && std::abs(data.rightA) > the_a_limit && std::abs(data.rightB) < 2 && (std::abs(data.rightA_back) > the_a_limit) data.front > 0.40f) {
+        } else if ((std::abs(data.rightA) > the_a_limit) && std::abs(data.rightA) > the_a_limit && std::abs(data.rightB) < 2 && (std::abs(data.rightA_back) > the_a_limit) && data.front > 0.40f) {
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT FRONT \t by LINES");
             detected_corridor = 2;
             //RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
             return 1;
-        } else if ((std::abs(data.leftA) > the_a_limit) && std::abs(data.leftB) > the_a_limit && std::abs(data.leftB) < 2 && (std::abs(data.leftA_back) > the_a_limit) data.front > 0.40f) {
+        } else if ((std::abs(data.leftA) > the_a_limit) && std::abs(data.leftB) > the_a_limit && std::abs(data.leftB) < 2 && (std::abs(data.leftA_back) > the_a_limit) && data.front > 0.40f) {
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t LEFT FRONT \t by LINES");
             detected_corridor = 1;
             //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
@@ -392,7 +397,9 @@ private:
         return 0;
     }
 
-    int check_for_corridor(data){
+    int check_for_corridor(const LaneLineData data){
+        //int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
+
         if (data.right > 0.35f && data.front < 0.40f){
             RCLCPP_INFO(this->get_logger(), "corridor detected \t RIGHT FRONT \t by MK");
             detected_corridor = 7;
@@ -409,7 +416,7 @@ private:
         return 0;
     }
 
-    void turning_decision(){
+    void turning_decision(const algorithms::LidarFiltrResults& results) {
         if (turn_to_!= -5){       // kontrola jestli je na stacku marker
             if(turn_to_ > 0 && turn_to_ < 7){ // reaguje na crossroads
                 //RCLCPP_INFO(this->get_logger(), "Detected ArUco marker: %d", turn_to_);
@@ -419,9 +426,9 @@ private:
                     //start_turning(1); // 1 = turn LEFT
                     turn_to_ = -5; // reset marker ID
                     return;
-                } else if ((turn_to_ == 2) && (detected_corridot = 4 || detected_corridor == 6)) {    // deciding which way to turn
+                } else if ((turn_to_ == 2) && (detected_corridor = 4 || detected_corridor == 6)) {    // deciding which way to turn
                     RCLCPP_INFO(this->get_logger(), "turning \t RIGHT \t by MK");
-                    pause_then_turn(-1); // -1 == turn RIGHT
+                    pause_and_turn(-1); // -1 == turn RIGHT
                     //start_turning(-1);                                          // -1 == turn RIGHT
                     turn_to_ = -5; // reset marker ID
                     return;
@@ -441,7 +448,7 @@ private:
                     return;
                 }
             }else{      // executed when only corridor detected
-                if (esults.left > 0.35f && results.front < 0.25f) {    // old < 0.19f
+                if (results.left > 0.35f && results.front < 0.25f) {    // old < 0.19f
                     start_turning(1);                                          // 1 == turn left
                     return;
                 } else if (results.right > 0.35f && results.front < 0.25f) {    // old 0.3f, 0.3f
@@ -455,13 +462,13 @@ private:
             }
         }else{
 
-            if (need_ && results.left > 0.35f && results.front < 0.25f) {    // deciding which way to turn
+            if (results.left > 0.35f && results.front < 0.25f) {    // deciding which way to turn
                 start_turning(1);                                          // 1 == turn left
                 return;
-            } else if (need_ && results.right > 0.35f && results.front < 0.25f) {    // old 0.3f, 0.3f
+            } else if (results.right > 0.35f && results.front < 0.25f) {    // old 0.3f, 0.3f
                 start_turning(-1);
                 return;
-            } else if (need_ && results.front < 0.20f) {    // if too close to wall, turn 180
+            } else if (results.front < 0.20f) {    // if too close to wall, turn 180
                 start_turning(0);
                 return;
             }
@@ -478,7 +485,7 @@ private:
         int last_marker_id = camera_node_->getLastMarkerId();
         check_for_marker(last_marker_id);
         
-        int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
+        //int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
 
         
         lineRightSlopeFilter.addValue(results.line_right.first);
@@ -507,6 +514,8 @@ private:
                 //everythin is fucked or no corridor detected
             }
         }
+
+        turning_decision(results);
         // the old way
         //if (((smoothedRightA <= -5 || smoothedRightA >= 5) && std::abs(smoothedRightB) > 0.6 && std::abs(smoothedRightB) < 2) &&  ((smoothedLeftA <= -5 || smoothedLeftA >= 5) && std::abs(smoothedLeftB) > 0.6 && std::abs(smoothedLeftB) < 2)) {
         /*
@@ -530,9 +539,9 @@ private:
             detected_corridor = 0;
             RCLCPP_INFO(this->get_logger(), "RIGHT median: %f", results.median_right); // info text
             //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
-            RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", smoothedRightA, smoothedRightB); // info text
+            RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", data.rightA, data.rightB); // info text
             //RCLCPP_INFO(this->get_logger(), "LEFT line BACK: y = ax + b; a= %f, b= %f", smoothedLeftA_back, smoothedLeftB_back); // info text
-            RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", smoothedRightA_back, smoothedRightB_back); // info text
+            RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", data.rightA_back, data.rightB_back); // info text
         
         }
             */
@@ -668,7 +677,7 @@ private:
             RCLCPP_INFO(this->get_logger(), "Motors running...");
         }
     }
-
+/*
     void pause_and_turn(int direction) {
         RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
         auto pause_timer = this->create_wall_timer(
@@ -688,6 +697,44 @@ private:
             }
         );
     }
+
+void pause_and_turn(int direction) {
+    RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
+    auto start = this->now();
+    pause_and_turn_timer_ = this->create_wall_timer(
+        100ms,
+        [this, direction, start]() mutable {
+            if ((this->now() - start).seconds() >= 1.0) {
+                pause_and_turn_timer_->cancel();
+                start_turning(direction);
+            } else {
+                std_msgs::msg::UInt8MultiArray msg;
+                msg.data = {140, 140};
+                motor_pub_->publish(msg);
+            }
+        }
+    );
+}
+*/
+void pause_and_turn(int direction) {
+    RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
+    auto start = this->now();
+    pause_and_turn_timer_ = this->create_wall_timer(
+        100ms,
+        [this, direction, start]() mutable {
+            if ((this->now() - start).seconds() >= 1.0) {
+                if (pause_and_turn_timer_) {
+                    pause_and_turn_timer_->cancel();
+                }
+                start_turning(direction);
+            } else {
+                std_msgs::msg::UInt8MultiArray msg;
+                msg.data = {140, 140};
+                motor_pub_->publish(msg);
+            }
+        }
+    );
+}
 
     void start_turning(int direction) {
         yaw_start_ = integrator_.getYaw();
