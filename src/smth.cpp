@@ -19,6 +19,7 @@ using namespace std::chrono_literals;
 
 rclcpp::TimerBase::SharedPtr go_straight_timer_;
 rclcpp::Time go_straight_start_time_;
+rclcpp::Time pause_and_turn_start_;
 rclcpp::TimerBase::SharedPtr pause_and_turn_timer_;
 
 template<typename T>
@@ -208,11 +209,7 @@ class CorridorRobot : public rclcpp::Node {
 public:
     enum State { CALIBRATION, CORRIDOR_FOLLOWING, TURNING, STRAIGHT_DELAY, GOING_STRAIGHT_AFTER_TURN, STOP, GOING_TO_CENTRE };
     int turn_to_ = -5;  // persistent across callbacks
-    int previous_detected_corridor_left = 0;
-    int previous_detected_corridor_right = 0;
-    int left_line_end = 0;
-    int right_line_end = 0;
-    int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
+    int detected_corridor = 0;  // 0 = no corridor, 1 = left front, 2 = right front, 3 = left right, 4 = right front MK, 5 = left front MK, 6 = crossroads, 7 = only right, 8 = only left
 
     struct LaneLineData {
         float front;
@@ -279,6 +276,7 @@ private:
         } else if (state_ == TURNING) {
             integrator_.update(gyro_z, dt);
             float delta_yaw = integrator_.getYaw() - yaw_start_;
+            check_for_marker(camera_node_->getLastMarkerId());      // cteni markeru pri otaceni
             RCLCPP_INFO(this->get_logger(), "Turning... Delta Yaw: %f", delta_yaw);
 
 
@@ -300,25 +298,6 @@ private:
                 } else {
                     rotate_in_place(turn_direction_);
                 }
-            
-            /*
-            if (abs(turn_direction_) > 0 && (std::fabs(delta_yaw)) >= M_PI / 2.6) {     // end of turning after pi/3 -> 60°? should it be 90°? s pi/4 funguje otaceni o 90
-                integrator_.reset();
-                if(state_ != STOP){  // added 17.4.
-                    state_ = GOING_STRAIGHT_AFTER_TURN;
-                    go_straight();
-                    RCLCPP_INFO(this->get_logger(), "Finished turn 90, now GOING_STRAIGHT_AFTER_TURN");
-                }
-            }else if (turn_direction_ == 0 && (std::fabs(delta_yaw)) >= M_PI/1.2) {
-                if(state_ != STOP){  // added 17.4.
-                    state_ = GOING_STRAIGHT_AFTER_TURN;
-                    go_straight();
-                    RCLCPP_INFO(this->get_logger(), "Finished turn 180, now GOING_STRAIGHT_AFTER_TURN");
-                }
-            } else {
-                rotate_in_place(turn_direction_);
-            }
-                */
         }
     }
 
@@ -376,6 +355,10 @@ private:
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT LEFT FRONT \t by MK");
             detected_corridor = 6;
             return 1;
+        } else if (data.front < 0.27f && data.right > 0.35f && data.left > 0.35f){
+            RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT LEFT \t by MK");
+            detected_corridor = 3; // not ideal, could start turning at wrong spots
+            return 1;
         } else if (data.right > 0.35f && data.front > 0.40f){
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT FRONT \t by MK");
             detected_corridor = 4;
@@ -383,7 +366,11 @@ private:
         } else if (data.left > 0.35f && data.front > 0.40f){
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t on LEFT FRONT \t by MK");
             detected_corridor = 5;   
-            return 1;   
+            return 1;
+        //} else if (data.front > Xf && data.right/left > Xf){     // lets hope we wont use this
+        //    RCLCPP_INFO(this->get_logger(), "crossroads detected \t XXXX \t by BACKBONE");
+        //    detected_corridor = X;
+        //    return 1;   
         } else {
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t NOT");
             RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);   // info text
@@ -397,15 +384,15 @@ private:
         return 0;
     }
 
-    int check_for_corridor(const LaneLineData data){
+    int check_for_corridor(const LaneLineData data){        // values not used furtherore, but can be
         //int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
 
         if (data.right > 0.35f && data.front < 0.40f){
-            RCLCPP_INFO(this->get_logger(), "corridor detected \t RIGHT FRONT \t by MK");
+            RCLCPP_INFO(this->get_logger(), "corridor detected \t RIGHT \t by MK");
             detected_corridor = 7;
             return 1;
         } else if (data.left > 0.35f && data.front < 0.40f){
-            RCLCPP_INFO(this->get_logger(), "corridor detected \t on LEFT FRONT \t by MK");
+            RCLCPP_INFO(this->get_logger(), "corridor detected \t on LEFT \t by MK");
             detected_corridor = 8;   
             return 1;    
         } else {
@@ -604,35 +591,6 @@ private:
         if(results.right_front_corner > 0.3f){
             results.right_front_corner = 0.25f;
         }
-        
-    /*
-        if (need_ && results.right < 0.3f && results.front < 0.3f) {    // deciding which way to turn
-            start_turning(-1);                                          // -1 == turn left??
-            return;
-        } else if (need_ && results.left < 0.3f && results.front < 0.3f) {
-            start_turning(1);
-            return;
-        }
-        */
-       /*
-        float tmp_smoothedLeftA;
-        if (std::abs(smoothedLeftA) < 0.7f && std::abs(smoothedLeftA) > 0.01f){
-            tmp_smoothedLeftA = smoothedLeftA;
-        }else{
-            tmp_smoothedLeftA = 4/16;
-        }
-
-        float tmp_smoothedRightA;
-        if (std::abs(smoothedRightA) < 0.7f && std::abs(smoothedRightA) > 0.01f){
-            tmp_smoothedRightA = smoothedRightA;
-        }else{
-            tmp_smoothedRightA = 4/16;
-        }
-        */
-        //RCLCPP_INFO(this->get_logger(), "LEFT: %f", results.left);
-        //RCLCPP_INFO(this->get_logger(), "RIGHT: %f", results.right);
-        //RCLCPP_INFO(this->get_logger(), "LEFT_FRONT: %f", results.left_front_corner);
-        //RCLCPP_INFO(this->get_logger(), "RIGHT_FRONT: %f", results.right_front_corner);
 
 
         float center_offset = 0.0f;
@@ -677,56 +635,19 @@ private:
             RCLCPP_INFO(this->get_logger(), "Motors running...");
         }
     }
-/*
-    void pause_and_turn(int direction) {
-        RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
-        auto pause_timer = this->create_wall_timer(
-            100ms,
-            [this, direction, start = this->now(), pause_timer = rclcpp::TimerBase::WeakPtr()]() mutable {
-                if ((this->now() - start).seconds() >= 1.0) {
-                    if (auto timer = pause_timer.lock()) {
-                        timer->cancel();
-                    }
-                    start_turning(direction);
-                } else {
-                    // Go straight during the pause
-                    std_msgs::msg::UInt8MultiArray msg;
-                    msg.data = {140, 140};
-                    motor_pub_->publish(msg);
-                }
-            }
-        );
-    }
 
 void pause_and_turn(int direction) {
     RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
-    auto start = this->now();
+    pause_and_turn_start_ = this->now();
     pause_and_turn_timer_ = this->create_wall_timer(
         100ms,
-        [this, direction, start]() mutable {
-            if ((this->now() - start).seconds() >= 1.0) {
+        [this, direction]() {
+            auto now = this->now();
+            if ((now - pause_and_turn_start_).seconds() >= 1.0) {// 1 je doba timeru ve vterinach
                 pause_and_turn_timer_->cancel();
+                RCLCPP_INFO(this->get_logger(), "Straight movement complete. Back to CORRIDOR_FOLLOWING.");
                 start_turning(direction);
-            } else {
-                std_msgs::msg::UInt8MultiArray msg;
-                msg.data = {140, 140};
-                motor_pub_->publish(msg);
-            }
-        }
-    );
-}
-*/
-void pause_and_turn(int direction) {
-    RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
-    auto start = this->now();
-    pause_and_turn_timer_ = this->create_wall_timer(
-        100ms,
-        [this, direction, start]() mutable {
-            if ((this->now() - start).seconds() >= 1.0) {
-                if (pause_and_turn_timer_) {
-                    pause_and_turn_timer_->cancel();
-                }
-                start_turning(direction);
+                return;
             } else {
                 std_msgs::msg::UInt8MultiArray msg;
                 msg.data = {140, 140};
@@ -753,7 +674,7 @@ void pause_and_turn(int direction) {
                 check_for_marker(last_marker_id);
                 if ((now - go_straight_start_time_).seconds() >= duration_seconds) {
                     go_straight_timer_->cancel();
-                    if (state_ == GOING_STRAIGHT_AFTER_TURN && state_ != STOP) { // stop added 17.4.
+                    if (state_ == GOING_STRAIGHT_AFTER_TURN) { // stop added 17.4.
                         state_ = CORRIDOR_FOLLOWING;
                         RCLCPP_INFO(this->get_logger(), "Straight movement complete. Back to CORRIDOR_FOLLOWING.");
                     }
@@ -764,47 +685,6 @@ void pause_and_turn(int direction) {
                 motor_pub_->publish(msg);
             });
     }
-/*
-    void go_straight_to_centre(double duration_seconds) {
-        RCLCPP_INFO(this->get_logger(), "go straight to centre function called");
-    
-        // Set the start time when the movement begins using the ROS time from `this->now()`
-        go_straight_start_time_ = this->now();
-        RCLCPP_INFO(this->get_logger(), "Start time: %.2f seconds", go_straight_start_time_.seconds());
-    
-        // Create a timer that checks every 100ms
-        go_straight_timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(100),  // Timer checks every 100ms
-            [this, duration_seconds]() {
-                // Debugging log to confirm timer is firing
-                RCLCPP_INFO(this->get_logger(), "Timer triggered, checking elapsed time...");
-    
-                auto now = this->now();  // Use the same method as go_straight_start_time_
-                double elapsed_time = (now - go_straight_start_time_).seconds();
-    
-                // Log the elapsed time every time the timer fires
-                RCLCPP_INFO(this->get_logger(), "Elapsed time: %.2f seconds", elapsed_time);
-    
-                if (elapsed_time < duration_seconds) {
-                    // Send motor command to go straight continuously during the duration
-                    std_msgs::msg::UInt8MultiArray msg;
-                    msg.data = {130, 130};  // Set the desired motor speed (adjust values as needed)
-                    motor_pub_->publish(msg);
-                    RCLCPP_INFO(this->get_logger(), "Motors running...");
-                } else {
-                    // Once the specified duration has passed, stop the motors
-                    go_straight_timer_->cancel();  // Stop the timer
-                    std_msgs::msg::UInt8MultiArray stop_msg;
-                    stop_msg.data = {0, 0};  // Stop motors (adjust as needed)
-                    motor_pub_->publish(stop_msg);
-                    RCLCPP_INFO(this->get_logger(), "go straight to centre complete");
-    
-                    // Update state back to corridor following
-                    state_ = CORRIDOR_FOLLOWING;
-                }
-            });
-    }
-    */
     
     
     void rotate_in_place(int direction) {
