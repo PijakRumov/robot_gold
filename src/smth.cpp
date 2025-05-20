@@ -58,8 +58,8 @@ struct LidarFiltrResults {
     float right;
     float left_front_corner;
     float right_front_corner;
-    //float left_back_corner;
-    //float right_back_corner;
+    float left_back_corner;
+    float right_back_corner;
     std::pair<float, float> line_right;
     std::pair<float, float> line_left;
     std::pair<float, float> line_right_back;
@@ -71,7 +71,7 @@ class LidarFiltr {
 public:
     LidarFiltrResults apply_filter(std::vector<float> points, float angle_start, float angle_end) {
         constexpr float angle_range = M_PI / 12; //old = pi/12 => 15°; sensing 2x15° from all directions // ZK1 melo PI/
-        std::vector<float> left, right, front, back, left_front_corner, right_front_corner;// left_back_corner, right_back_corner;
+        std::vector<float> left, right, front, back, left_front_corner, right_front_corner, left_back_corner, right_back_corner;
         std::vector<PolarPoint> line_right, line_left, line_right_back, line_left_back;
         auto angle_step = (angle_end - angle_start) / points.size();
 
@@ -100,15 +100,13 @@ public:
             }
             else if (angle > -M_PI / 2 + M_PI / 6 && angle <= -M_PI * (7/24)){ // old -M_PI / 2 + M_PI / 4
                 line_left_back.push_back({angle, dist});
-            }
-/*            
+            }           
             else if (angle > M_PI / 4 - angle_range && angle <= M_PI / 4 + angle_range) {
                 right_back_corner.push_back(points[i]);
             }
             else if (angle > -M_PI / 4 - angle_range && angle <= -M_PI / 4 + angle_range) {
                 left_back_corner.push_back(points[i]);
             }
-                */
             else if (angle > 3 * M_PI / 4 - angle_range && angle <= 3* M_PI / 4 + angle_range) {
                 right_front_corner.push_back(points[i]);
             }
@@ -130,8 +128,8 @@ public:
             .right = right.empty() ? 0.0f : std::accumulate(right.begin(), right.end(), 0.0f) / right.size(),
             .left_front_corner = left_front_corner.empty() ? 0.0f : std::accumulate(left_front_corner.begin(), left_front_corner.end(), 0.0f) / left_front_corner.size(),
             .right_front_corner = right_front_corner.empty() ? 0.0f : std::accumulate(right_front_corner.begin(), right_front_corner.end(), 0.0f) / right_front_corner.size(),
-            //.left_back_corner = left_back_corner.empty() ? 0.0f : std::accumulate(left_back_corner.begin(), left_back_corner.end(), 0.0f) / left_back_corner.size(),
-            //.right_back_corner = right_back_corner.empty() ? 0.0f : std::accumulate(right_back_corner.begin(), right_back_corner.end(), 0.0f) / right_back_corner.size(),
+            .left_back_corner = left_back_corner.empty() ? 0.0f : std::accumulate(left_back_corner.begin(), left_back_corner.end(), 0.0f) / left_back_corner.size(),
+            .right_back_corner = right_back_corner.empty() ? 0.0f : std::accumulate(right_back_corner.begin(), right_back_corner.end(), 0.0f) / right_back_corner.size(),
             .line_right = linearRegressionPolar(line_right),
             .line_left = linearRegressionPolar(line_left),
             .line_right_back = linearRegressionPolar(line_right_back),
@@ -207,14 +205,19 @@ private:
 
 class CorridorRobot : public rclcpp::Node {
 public:
-    enum State { CALIBRATION, CORRIDOR_FOLLOWING, TURNING, STRAIGHT_DELAY, GOING_STRAIGHT_AFTER_TURN, STOP, GOING_TO_CENTRE };
+    enum State { CALIBRATION, CORRIDOR_FOLLOWING, TURNING, STRAIGHT_DELAY, GOING_STRAIGHT_AFTER_TURN, STOP, GOING_TO_CENTRE, PAUSE_AND_TURN};
     int turn_to_ = -5;  // persistent across callbacks
     int detected_corridor = 0;  // 0 = no corridor, 1 = left front, 2 = right front, 3 = left right, 4 = right front MK, 5 = left front MK, 6 = crossroads, 7 = only right, 8 = only left
 
     struct LaneLineData {
         float front;
         float right;
+        float back;
+        float right_front_corner;
+        float right_back_corner;
         float left;
+        float left_front_corner;
+        float left_back_corner;
         float rightA;
         float rightB;
         float leftA;
@@ -280,19 +283,19 @@ private:
             RCLCPP_INFO(this->get_logger(), "Turning... Delta Yaw: %f", delta_yaw);
 
 
-                if (abs(turn_direction_) > 0 && (std::fabs(delta_yaw)) >= M_PI / 2.6) {     // end of turning after pi/3 -> 60°? should it be 90°? s pi/4 funguje otaceni o 90
+                if (abs(turn_direction_) > 0 && (std::fabs(delta_yaw)) >= M_PI / 2.4) {     // end of turning after pi/3 -> 60°? should it be 90°? s pi/4 funguje otaceni o 90
                     integrator_.reset();
                     if(state_ != STOP){  // added 17.4.
                         state_ = GOING_STRAIGHT_AFTER_TURN;
                         //std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-                        go_straight(1.1);
+                        go_straight(0.4);
                         RCLCPP_INFO(this->get_logger(), "Finished turn 90, now GOING_STRAIGHT_AFTER_TURN");
                     }
                 }else if (turn_direction_ == 0 && (std::fabs(delta_yaw)) >= M_PI/1.1) {
                     if(state_ != STOP){  // added 17.4.
                         state_ = GOING_STRAIGHT_AFTER_TURN;
                         //std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-                        go_straight(1.1);
+                        go_straight(0.4);
                         RCLCPP_INFO(this->get_logger(), "Finished turn 180, now GOING_STRAIGHT_AFTER_TURN");
                     }
                 } else {
@@ -307,8 +310,9 @@ private:
 
         if (marker_id != -5) {
             turn_to_ = marker_id;
+
             if (turn_to_ == 10) {
-                turn_to_ = 0;  // right
+                turn_to_ = -5;  // right
             } else if (turn_to_ == 11) {
                 turn_to_ = 1;  // left
             } else if (turn_to_ == 12) {
@@ -335,6 +339,8 @@ private:
 
     int check_for_crossroads(const LaneLineData data){
         int the_a_limit = 1.5;
+        check_for_marker(camera_node_->getLastMarkerId());      // cteni markeru pri otaceni
+        RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);
         //int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
 
         if (((std::abs(data.rightA) > the_a_limit) && (abs(data.rightA_back) > the_a_limit) && std::abs(data.rightB) < 2) &&  ((std::abs(data.leftA) > the_a_limit) && (std::abs(data.leftA_back) > the_a_limit) && std::abs(data.leftB) < 2) && data.front > 0.35f) {
@@ -351,19 +357,20 @@ private:
             detected_corridor = 1;
             //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
             return 1;
-        } else if (data.right > 0.35f && data.front > 0.40f && data.left > 0.35f){
+        } else if (data.right > 0.35f && data.right_front_corner > 0.35f && data.left_front_corner > 0.35f && data.front > 0.45f && data.left > 0.35f && data.back > 0.45f){
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT LEFT FRONT \t by MK");
             detected_corridor = 6;
             return 1;
-        } else if (data.front < 0.27f && data.right > 0.35f && data.left > 0.35f){
+        } else if (data.front < 0.27f && data.right > 0.35f && data.left > 0.35f && data.back > 0.45f){
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT LEFT \t by MK");
             detected_corridor = 3; // not ideal, could start turning at wrong spots
             return 1;
-        } else if (data.right > 0.35f && data.front > 0.40f){
+        } else if (data.right > 0.35f && data.right_front_corner > 0.35f && data.front > 0.45f && data.back > 0.45f){
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t RIGHT FRONT \t by MK");
+            RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);
             detected_corridor = 4;
             return 1;
-        } else if (data.left > 0.35f && data.front > 0.40f){
+        } else if (data.left > 0.35f && data.left_front_corner > 0.35f && data.front > 0.45f && data.back > 0.45f){
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t on LEFT FRONT \t by MK");
             detected_corridor = 5;   
             return 1;
@@ -373,25 +380,28 @@ private:
         //    return 1;   
         } else {
             RCLCPP_INFO(this->get_logger(), "crossroads detected \t NOT");
-            RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);   // info text
+            //RCLCPP_INFO(this->get_logger(), "right: \t %f \t right_front: %f", data.right, data.right_front_corner);
+
+            //RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);   // info text
             detected_corridor = 0;
             //RCLCPP_INFO(this->get_logger(), "RIGHT median: %f", results.median_right); // info text
             //RCLCPP_INFO(this->get_logger(), "LEFT line: y = ax + b; a= %f, b= %f", smoothedLeftA, smoothedLeftB); // info text
             //RCLCPP_INFO(this->get_logger(), "RIGHT line: y = ax + b; a= %f, b= %f", data.rightA, data.rightB); // info text
             //RCLCPP_INFO(this->get_logger(), "LEFT line BACK: y = ax + b; a= %f, b= %f", smoothedLeftA_back, smoothedLeftB_back); // info text
             //RCLCPP_INFO(this->get_logger(), "RIGHT line BACK: y = ax + b; a= %f, b= %f", data.rightA_back, data.rightB_back); // info text
+            return 0;
         }
-        return 0;
+        //return 0;
     }
 
     int check_for_corridor(const LaneLineData data){        // values not used furtherore, but can be
         //int detected_corridor = 0;  // 0 = no corridor, 1 = left, 2 = right, 3 = both
 
-        if (data.right > 0.35f && data.front < 0.40f){
+        if (data.right > 0.35f && data.front < 0.30f){
             RCLCPP_INFO(this->get_logger(), "corridor detected \t RIGHT \t by MK");
             detected_corridor = 7;
             return 1;
-        } else if (data.left > 0.35f && data.front < 0.40f){
+        } else if (data.left > 0.35f && data.front < 0.30f){
             RCLCPP_INFO(this->get_logger(), "corridor detected \t on LEFT \t by MK");
             detected_corridor = 8;   
             return 1;    
@@ -399,25 +409,32 @@ private:
             RCLCPP_INFO(this->get_logger(), "corridor detected \t NOT");
             RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);
             detected_corridor = 0;
+            return 0;
         }
-        return 0;
+        //return 0;
     }
 
     void turning_decision(const algorithms::LidarFiltrResults& results) {
+        int last_marker_id = camera_node_->getLastMarkerId();
+        check_for_marker(last_marker_id);
+        RCLCPP_INFO(this->get_logger(), "last ArUco marker: %d", turn_to_);
+        RCLCPP_INFO(this->get_logger(), "detected corridor num: %d", detected_corridor);
         if (turn_to_!= -5){       // kontrola jestli je na stacku marker
-            if(turn_to_ > 0 && turn_to_ < 7){ // reaguje na crossroads
+            if(turn_to_ > 0 && turn_to_ < 7 && results.front > 0.25){ // reaguje na crossroads
                 //RCLCPP_INFO(this->get_logger(), "Detected ArUco marker: %d", turn_to_);
                 if((turn_to_ == 1) && (detected_corridor == 5 || detected_corridor == 6)){
-                    RCLCPP_INFO(this->get_logger(), "turning \t LEFT \t by MK");
+                    RCLCPP_INFO(this->get_logger(), "pause and turning \t LEFT \t by MK");
+                    state_ = PAUSE_AND_TURN;
                     pause_and_turn(1); // 1 = turn LEFT
                     //start_turning(1); // 1 = turn LEFT
-                    turn_to_ = -5; // reset marker ID
+                    //turn_to_ = -5; // reset marker ID
                     return;
-                } else if ((turn_to_ == 2) && (detected_corridor = 4 || detected_corridor == 6)) {    // deciding which way to turn
-                    RCLCPP_INFO(this->get_logger(), "turning \t RIGHT \t by MK");
+                } else if ((turn_to_ == 2) && (detected_corridor == 4 || detected_corridor == 6)) {    // deciding which way to turn
+                    RCLCPP_INFO(this->get_logger(), "pause and turning \t RIGHT \t by MK");
+                    state_ = PAUSE_AND_TURN;
                     pause_and_turn(-1); // -1 == turn RIGHT
                     //start_turning(-1);                                          // -1 == turn RIGHT
-                    turn_to_ = -5; // reset marker ID
+                    //turn_to_ = -5; // reset marker ID
                     return;
                 } else if ((turn_to_ == 1) && (detected_corridor == 1 || detected_corridor == 3 )) {
                     RCLCPP_INFO(this->get_logger(), "turning \t LEFT \t by LINES");
@@ -495,12 +512,20 @@ private:
         laneData.front = results.front;
         laneData.right = results.right;
         laneData.left = results.left;
-
+        laneData.right_front_corner = results.right_front_corner;
+        laneData.left_front_corner = results.left_front_corner;
+        laneData.right_back_corner = results.right_back_corner;
+        laneData.left_back_corner = results.left_back_corner;
+        laneData.back = results.back;
+        /*
         if(check_for_crossroads(laneData) != 1){
             if(check_for_corridor(laneData) != 1){
                 //everythin is fucked or no corridor detected
             }
         }
+            */
+        int pokus = check_for_crossroads(laneData);
+        //int pokuss = check_for_corridor(laneData); 
 
         turning_decision(results);
         // the old way
@@ -532,7 +557,7 @@ private:
         
         }
             */
-/*
+        /*
         if (turn_to_!= -5){        // NEJSME schopni projet zatacku + !!!!!! && results.front > 0.27f
             if(turn_to_ == 0 || turn_to_ == 1 || turn_to_ == 2){ // marker ID 0, 1, 2
                 RCLCPP_INFO(this->get_logger(), "Detected ArUco marker: %d", turn_to_);
@@ -611,7 +636,7 @@ private:
             RCLCPP_INFO(this->get_logger(), "center offset PID: %f", center_offset);
             //RCLCPP_INFO(this->get_logger(), "center offset: %f", center_offset);
             //float y = pid2->step(x, 0.1);
-            RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
+            //RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
             send_motor_command(x);
         }else if (center_offset > 10.0f){
             center_offset = 10.0f;
@@ -619,14 +644,14 @@ private:
             float x = pid->step(center_offset, 0.1);
             //RCLCPP_INFO(this->get_logger(), "center offset: %f", center_offset);
             //float y = pid2->step(x, 0.1);
-            RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
+            //RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
             send_motor_command(x);
         }else if (center_offset < -10.0f){
             center_offset = -10.0f;
             float x = pid->step(center_offset, 0.1);
             RCLCPP_INFO(this->get_logger(), "center offset: %f", center_offset);
             //float y = pid2->step(x, 0.1);
-            RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
+            //RCLCPP_INFO(this->get_logger(), "PID output: %f", x);
             send_motor_command(x);
         }else {
             std_msgs::msg::UInt8MultiArray msg;
@@ -635,18 +660,25 @@ private:
             RCLCPP_INFO(this->get_logger(), "Motors running...");
         }
     }
-
-void pause_and_turn(int direction) {
+    /*
+    void pause_and_turn(int direction, const LaneLineData data) {
     RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
     pause_and_turn_start_ = this->now();
     pause_and_turn_timer_ = this->create_wall_timer(
         100ms,
         [this, direction]() {
             auto now = this->now();
-            if ((now - pause_and_turn_start_).seconds() >= 1.0) {// 1 je doba timeru ve vterinach
+            if ((now - pause_and_turn_start_).seconds() >= 1.6) {// 1.6 je doba timeru ve vterinach
                 pause_and_turn_timer_->cancel();
-                RCLCPP_INFO(this->get_logger(), "Straight movement complete. Back to CORRIDOR_FOLLOWING.");
-                start_turning(direction);
+                if(direction == 1 && data.left > 0.35f && data.left_front_corner > 0.35f){
+                    RCLCPP_INFO(this->get_logger(), "Straight after pause complete. Now Turning LEFT");
+                    start_turning(direction);
+                } else if (direction == -1 && data.right > 0.35f && data.right_front_corner > 0.35f){
+                    RCLCPP_INFO(this->get_logger(), "Straight after pause complete. Now Turning RIGHT");
+                    start_turning(direction);
+                }
+                RCLCPP_INFO(this->get_logger(), "Straight after pause complete. crossroads NOT detected");
+                //start_turning(direction);
                 return;
             } else {
                 std_msgs::msg::UInt8MultiArray msg;
@@ -655,7 +687,54 @@ void pause_and_turn(int direction) {
             }
         }
     );
-}
+    }
+    */
+    void pause_and_turn(int direction){//, const LaneLineData data) {
+        RCLCPP_INFO(this->get_logger(), "Going straight for 1 second before turning");
+        pause_and_turn_start_ = this->now();
+        pause_and_turn_timer_ = this->create_wall_timer(
+           100ms,
+           [this, direction]() {
+                auto now = this->now();
+                if ((now - pause_and_turn_start_).seconds() >= 0.6) {
+                    pause_and_turn_timer_->cancel();
+                    /*
+                    RCLCPP_INFO(this->get_logger(), "Straight after pause complete. turning");
+                    start_turning(direction);
+                    */
+                    if(direction == 1){
+                        RCLCPP_INFO(this->get_logger(), "Straight after pause complete. Now Turning LEFT");
+                        start_turning(direction);
+                        turn_to_ = -5;
+                    } else if (direction == -1){
+                        RCLCPP_INFO(this->get_logger(), "Straight after pause complete. Now Turning RIGHT");
+                        start_turning(direction);
+                        turn_to_ = -5;
+                    } else{
+                    RCLCPP_INFO(this->get_logger(), "Straight after pause complete. crossroads NOT detected");
+                        state_ = CORRIDOR_FOLLOWING;
+                    }
+                    /*
+                    if(direction == 1 && data.left > 0.35f && data.left_front_corner > 0.35f && data.left_back_corner > 0.35f){
+                        RCLCPP_INFO(this->get_logger(), "Straight after pause complete. Now Turning LEFT");
+                        start_turning(direction);
+                    } else if (direction == -1 && data.right > 0.35f && data.right_front_corner > 0.35f && data.right_back_corner > 0.35f){
+                        RCLCPP_INFO(this->get_logger(), "Straight after pause complete. Now Turning RIGHT");
+                        start_turning(direction);
+                    }
+                    RCLCPP_INFO(this->get_logger(), "Straight after pause complete. crossroads NOT detected");
+                    */
+                    //state_ = CORRIDOR_FOLLOWING;
+                    return;
+                } else {
+                    std_msgs::msg::UInt8MultiArray msg;
+                    msg.data = {140, 140};
+                    motor_pub_->publish(msg);
+                }
+            }
+        );
+    }
+
 
     void start_turning(int direction) {
         yaw_start_ = integrator_.getYaw();
@@ -698,7 +777,7 @@ void pause_and_turn(int direction) {
     }
 
     void send_motor_command(float pid_output) {
-        uint8_t base_speed = 140;
+        uint8_t base_speed = 150;
         std_msgs::msg::UInt8MultiArray msg;
         if (pid_output > 0) {
             msg.data = {base_speed, static_cast<uint8_t>(base_speed - pid_output)};
